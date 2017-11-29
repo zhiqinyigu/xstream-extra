@@ -402,7 +402,7 @@
             if (this._cache !== NO) {
                 out._n(this._cache);
                 out._c();
-                return this.ins = NO;
+                return NO;
             }
         },
         _nFn: function(val, out) {
