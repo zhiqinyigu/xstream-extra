@@ -2,9 +2,9 @@
 xstream扩展，实现常用的Rxjs的操作符。主要让xstream在移动端使用得更方便，它们都是链式的。
 
 
-# 扩展的操作符
-## flattenMap
-## cache
+## 扩展的操作符
+### flattenMap
+### cache
 ```
 ----1-2-3--|-->
     cache()
@@ -15,19 +15,19 @@ xstream扩展，实现常用的Rxjs的操作符。主要让xstream在移动端�
 
 
 
-# RxJS5的同名操作符
-## throttle
-## throttleTime
-## debounce
-## debounceTime
-## delay
-## delayWhen
-## exhaust
-## exhaustMap
-## concat
-## concatMap
-## partition
-## do
-## withLatestFrom
-## distinctUntilChanged
-## retry
+## RxJS5的同名操作符
+### throttle
+### throttleTime
+### debounce
+### debounceTime
+### delay
+### delayWhen
+### exhaust
+### exhaustMap
+### concat
+### concatMap
+### partition
+### do
+### withLatestFrom
+### distinctUntilChanged
+### retry
