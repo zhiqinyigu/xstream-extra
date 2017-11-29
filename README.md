@@ -1,6 +1,22 @@
 # 简介
 xstream扩展，实现常用的Rxjs的操作符。主要让xstream在移动端使用得更方便，它们都是链式的。
-
+```
+Stream.create({
+	start(listener) {
+		this.timer = setTimeout(() => listener.next('json'), 2000);
+	},
+	stop() {
+		clearTimeout(this.timer);
+	}
+})
+.do(() => asd())
+.retry(2)
+.addListener({
+	next: val => console.log(val),
+	error: val => console.error(val),
+	complete: () => console.log('complete')
+});
+```
 
 ## 扩展的操作符
 ### flattenMap
