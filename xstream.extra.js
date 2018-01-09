@@ -33,7 +33,25 @@
         };
     })();
 
-    const Operator =  (function () {
+    function _try(c, t, u) {
+        try {
+            return c.f(t);
+        }
+        catch (e) {
+            u._e(e);
+            return NO;
+        }
+    }
+
+    function packPromise(pr) {
+        if (typeof pr.then == 'function') {
+            return Stream.fromPromise(pr);
+        }
+
+        return pr;
+    }
+
+    const Operator = (function () {
         function hookFactory(m) {
             return function(t) {
                 var u = this.out,
@@ -75,6 +93,7 @@
     _inherit(Throttle, Operator);
     function Throttle(fn, ins) {
         Throttle._super.call(this, fn, ins);
+        this.f = fn;
     }
 
     extend(Throttle.prototype, {
@@ -88,15 +107,22 @@
             this._lock = false;
         },
         _nFn: function(val, out$) {
-            var self = this;
+            var self = this,
+                throttle$;
 
             if (!self.throttle$) {
-                self.throttle$ = self.param(val);
-                self.throttle$._add(self._throttleProd = {
-                    _n() {self._unlock()},
-                    _e(err) {self.throttle$ = false, out$._e(err)},
-                    _c() {self._unlock()}
-                });
+                throttle$ = _try(this, val, out$);
+
+                if (throttle$ == NO) {
+                    return NO
+                } else {
+                    self.throttle$ = throttle$;
+                    self.throttle$._add(self._throttleProd = {
+                        _n() {self._unlock()},
+                        _e(err) {self.throttle$ = false, out$._e(err)},
+                        _c() {self._unlock()}
+                    });
+                }
             }
 
             if (!self._lock) {
@@ -116,12 +142,14 @@
         this._cid = 1;
         this._eid = 1;
         this._prevVal = NO;
+        this.f = fn;
     }
 
     Debounce.fnFactory = function(key) {
         return function(val, out$) {
             var self = this,
-                tid = ++this[key+'id'];
+                tid = ++this[key+'id'],
+                debounce$;
 
             function checkTid() {
                 return tid === self[key+'id'];
@@ -136,12 +164,18 @@
             if (key == '_n') {
                 self._prevVal = val;
                 self.stopFn();
-                self.debounce$ = self.param(val);
-                self.debounce$._add(self._debounceProd = {
-                    _n() {checkTid() && _action()},
-                    _e(err) {checkTid() && (self.debounce$ = null, out$._e(err))},
-                    _c() {checkTid() && (_action(), self.debounce$ = false)}
-                });
+                debounce$ = _try(this, val, out$);
+                
+                if (debounce$ == NO) {
+                    return NO
+                } else {
+                    self.debounce$ = debounce$;
+                    self.debounce$._add(self._debounceProd = {
+                        _n() {checkTid() && _action()},
+                        _e(err) {checkTid() && (self.debounce$ = null, out$._e(err))},
+                        _c() {checkTid() && (_action(), self.debounce$ = false)}
+                    });
+                }
             } else {
                 if (key === '_c' && self._prevVal !== NO) {
                     out$._n(self._prevVal);
@@ -167,17 +201,13 @@
     _inherit(Do, Operator);
     function Do(fn, ins) {
         Do._super.call(this, fn, ins);
+        this.f = fn;
     }
 
     extend(Do.prototype, {
         type: 'do',
-        _nFn: function(val, out$) {
-            try {
-                this.param(val);
-            } catch (e) {
-                out$._e(e);
-                return NO;
-            }
+        _nFn: function(t, u) {
+            return _try(this, t, u);
         }
     })
 
@@ -185,15 +215,22 @@
     _inherit(DelayWhen, Operator);
     function DelayWhen(factory, ins) {
         this.delayCount = 0;
+        this.open = true;
+        this.f = factory;
         DelayWhen._super.call(this, factory, ins);
     }
 
     extend(DelayWhen.prototype, {
         type: 'delayWhen',
+        startFn() {
+            this.open = true;
+        },
         _nFn: function(val, out$) {
             var self = this,
-                delay$ = this.param(val),
+                delay$ = _try(this, val, out$),
                 _delayProd;
+
+            if (delay$ == NO) {return NO}
 
             self.delayCount++;
 
@@ -206,6 +243,10 @@
                 if (delay$) {
                     out$._n(val);
                     self.delayCount--;
+
+                    if (!self.open) {
+                        self._c();
+                    }
                 }
 
                 _destory();
@@ -220,6 +261,7 @@
             return NO;
         },
         _cFn() {
+            this.open = false;
             if (this.delayCount !== 0) return NO;
         }
         // _eFn: DelayWhen.fnFactory('_e')
@@ -247,6 +289,8 @@
 
     _inherit(Exhaust, Operator);
     function Exhaust(fn, ins) {
+        this.open = true;
+        this.inner = NO;
         Exhaust._super.call(this, fn, ins);
     }
     extend(Exhaust.prototype, {
@@ -260,7 +304,7 @@
         _nFn: function(s, out) {
             if (this.inner !== NO) return NO;
             // this.param && this.param();
-            (this.inner = s)._add(new ExhaustListener(out, this));
+            (this.inner = packPromise(s))._add(new ExhaustListener(out, this));
             return NO;
         },
         less() {
@@ -282,6 +326,7 @@
         var self = this;
 
         Concat._super.call(this, param, ins);
+        this.open = true;
         this.streams = [];
         this._proxy = {
             _n(val) {
@@ -326,7 +371,7 @@
             var streams = this.streams;
 
             if (this.out === NO) return;
-            streams.push(val);
+            streams.push(packPromise(val));
 
             if (streams.length === 1) {
                 this.startNext();
@@ -334,6 +379,7 @@
         },
         _c() {
             this.open = false;
+
             if (!this.streams.length) {
                 this.startNext();
             }
@@ -357,7 +403,7 @@
                     self.latestVal = n;
                 },
                 _e(err) {
-                    out.error(err);
+                    out._e(err);
                 },
                 _c: noop
             })
@@ -437,6 +483,78 @@
         }
     });
 
+    /*SkipUntil*/
+    _inherit(SkipUntil, Operator);
+    function SkipUntil(stream, ins) {
+        SkipUntil._super.call(this, stream, ins);
+        this._lock = true;
+    }
+    extend(SkipUntil.prototype, {
+        type: 'skipUntil',
+        startFn() {
+            this._lock = true;
+        },
+        _nFn() {
+            var self = this;
+    
+            self.param.take(1)._add({
+                _n() {self._lock = false},
+                _c() {self._lock = false},
+                _e(err) {self._eFn(err)}
+            });
+    
+            if (self._lock) return NO;
+        }
+    });
+
+    /*TakeWhile*/
+    _inherit(TakeWhile, Operator);
+    function TakeWhile(fn, ins) {
+        TakeWhile._super.call(this, fn, ins);
+        this.f = fn;
+    }
+    extend(TakeWhile.prototype, {
+        type: 'takeWhile',
+        _nFn: function(t, u) {
+            var r = _try(this, t, u);
+
+            if (!r) {
+                u._c();
+                return NO;
+            } else if (r == NO) {
+                return NO
+            }
+        }
+    });
+
+    /*Reduce*/
+    _inherit(Reduce, Operator);
+    function Reduce(fn, ins) {
+        var self = this;
+
+        Reduce._super.call(this, fn, ins);
+        this.acc = this.param[1];
+        this.f = function (t) {return self.param[0](self.acc, t);};
+    }
+    extend(Reduce.prototype, {
+        type: 'reduce',
+        startFn: function() {
+            this.acc = this.param[1];
+        },
+        _nFn: function(t, u) {
+            var r = _try(this, t, u);
+
+            if (r != NO) {this.acc = r}
+
+            return NO;
+        },
+        _cFn: function() {
+            if (this.acc != NO) {
+                this.out._n(this.acc)
+            }
+        }
+    });
+
 
     /* warpGroup */
     _inherit(warpGroup, Operator);
@@ -502,10 +620,13 @@
 
     /* Concurrence */
     _inherit(Concurrence, Operator);
-    function Concurrence(fn, ins) {
-        Concurrence._super.call(this, fn, ins);
+    function Concurrence(param, ins) {
+        Concurrence._super.call(this, param, ins);
         this.taskCount = 0;
         this.queue = [];
+        this.open = true;
+        this.f = param[0];
+        this.max = param[1] || Infinity;
     }
 
     extend(Concurrence.prototype, {
@@ -545,18 +666,19 @@
         },
         _nFn: function(val, out$) {
             var self = this,
-                max = this.param[1],
-                factory = this.param[0],
                 task$;
 
             function _action(value) {
                 out$._n(value);
             }
 
-            if (self.taskCount < max) {
+            if (self.taskCount < self.max) {
                 self.taskCount++;
-                task$ = factory(val);
-                task$._add({
+                task$ = _try(this, val, out$);
+
+                if (task$ == NO) {return NO}
+
+                packPromise(task$)._add({
                     _n: _action,
                     _c() {/*self.lastCompleteVal = val;*/self.releaseOne();},
                     _e(err) {out$._e(err),self.releaseOne()}
@@ -634,6 +756,10 @@
             ]
         },
 
+        reduce(fn, initVal) {
+            return new Stream(new Reduce(arguments, this))
+        },
+
         exhaust() {
             return new Stream(new Exhaust(null, this))
         },
@@ -664,6 +790,14 @@
             return new Stream(new Retry(count, this))
         },
 
+        skipUntil(stream) {
+            return new Stream(new SkipUntil(stream, this))
+        },
+
+        takeWhile(fn) {
+            return new Stream(new TakeWhile(fn, this))
+        },
+
 
         /**
          * 以下操作符由业务需求衍生出来，属于实验性的功能。
@@ -683,7 +817,7 @@
                 time = () => Stream.periodic(t);
             }
 
-            return new Stream(new warpGroup([time, max], this))
+            return new Stream(new warpGroup(arguments, this))
         },
 
         /**
