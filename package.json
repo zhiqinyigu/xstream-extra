@@ -1,0 +1,22 @@
+{
+  "name": "xstream-extra-js",
+  "version": "0.0.1",
+  "description": "xstream扩展，实现常用的Rxjs的操作符。主要让xstream在移动端使用得更方便，它们都是链式的。\r ```javascript\r Stream.create({\r     start(listener) {\r         this.timer = setTimeout(() => listener.next('json'), 2000);\r     },\r     stop() {\r         clearTimeout(this.timer);\r     }\r })\r .do(() => asd())\r .retry(2)\r .addListener({\r     next: val => console.log(val),\r     error: val => console.error(val),\r     complete: () => console.log('complete')\r });\r ```",
+  "main": "xstream.extra.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhiqinyigu/xstream-extra.git"
+  },
+  "keywords": [
+    "xstream"
+  ],
+  "author": "chenyican",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/zhiqinyigu/xstream-extra/issues"
+  },
+  "homepage": "https://github.com/zhiqinyigu/xstream-extra#readme"
+}
