@@ -398,7 +398,7 @@
         startFn(out) {
             var self = this;
 
-            this.param._add({
+            this.param._add(this.prod = {
                 _n(n) {
                     self.latestVal = n;
                 },
@@ -414,6 +414,12 @@
             if (latestVal === NO) return NO;
             out._n([val, latestVal]);
             return NO;
+        },
+        _cFn() {
+            this.param._remove(this.prod);
+        },
+        _eFn() {
+            this.param._remove(this.prod);
         }
     });
 
