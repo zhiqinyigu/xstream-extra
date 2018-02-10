@@ -321,11 +321,11 @@
 
 
     /* Concat */
-    _inherit(Concat, Operator);
-    function Concat(param, ins) {
+    _inherit(ConcatAll, Operator);
+    function ConcatAll(param, ins) {
         var self = this;
 
-        Concat._super.call(this, param, ins);
+        ConcatAll._super.call(this, param, ins);
         this.open = true;
         this.streams = [];
         this._proxy = {
@@ -343,8 +343,8 @@
             }
         };
     }
-    extend(Concat.prototype, {
-        type: 'concat',
+    extend(ConcatAll.prototype, {
+        type: 'concatAll',
         startNext() {
             var u = this.out,
                 streams = this.streams;
@@ -359,10 +359,12 @@
         },
         stopFn() {
             const streams = this.streams;
+
+            this.open = false;
             if (streams.length) {
                 streams[0]._remove(this._proxy);
+                streams.splice(0);
             }
-            this.streams.splice(0);
         },
         startFn() {
             this.open = true;
@@ -386,6 +388,40 @@
         }
     });
 
+    /*_inherit(Concat, ConcatAll);
+    function Concat(param, ins) {
+        Concat._super.call(this, param, ins);
+    }
+    extend(ConcatAll.prototype, {
+        type: 'concat',
+        startNext() {
+            var u = this.out,
+                streams = this.streams;
+
+            if (u === NO) return;
+
+            if (streams.length) {
+                streams[0]._add(this._proxy);
+            } else {
+                u._c();
+            }
+        },
+        _c() {
+            var streams = this.streams;
+
+            this.open = true;
+            streams.push.apply(streams, this.param);
+
+            if (streams.length) {
+                this.startNext();
+            }
+        },
+        _n(t) {
+            var u = this.out;
+            if (u === NO) return;
+            u._n(t);
+        }
+    });*/
 
     /* WithLatestFrom */
     _inherit(WithLatestFrom, Operator);
@@ -702,6 +738,37 @@
     /*
      * extend。如无特殊说明，操作符都是返回Stream。
      */
+    extend(Stream, {
+        Subject: function() {
+            return Stream.create({
+                start() {},
+                stop() {}
+            });
+        },
+        loopAnimationFrame: function() {
+            return Stream.create({
+                start(prod) {
+                    var i = 0,
+                        self = this;
+
+                    function loop() {
+                        if (self._open) {
+                            prod.next(i++);
+                            requestAnimationFrame(loop)
+                        }
+                    }
+
+                    self._open = true;
+                    loop();
+                },
+                stop() {
+                    this._open = false;
+                }
+            })
+        }
+    });
+
+
     extend(Stream.prototype, {
         flattenMap(fn) {
             return this.map(fn).flatten();
@@ -772,11 +839,16 @@
         exhaustMap(fn) {
             return this.map(fn).exhaust();
         },
-        concat() {
-            return new Stream(new Concat(null, this))
+        /*concat() {
+            if (!arguments.length) throw new Error('concat: no next stream');
+
+            return new Stream(new Concat(arguments, this))
+        },*/
+        concatAll() {
+            return new Stream(new ConcatAll(null, this))
         },
         concatMap(fn) {
-            return this.map(fn).concat();
+            return this.map(fn).concatAll();
         },
 
         withLatestFrom(stream) {

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Document</title>
+</head>
+<body>
+    <script src="xstream.js"></script>
+    <script src="xstream.extra.js"></script>
+    <script>
+        var {Stream} = xstream;
+
+        Stream.periodic(1000)
+            .take(6)
+            .concat(
+                Stream.periodic(1000)
+                    .take(3)
+                    .map(n => {
+                        if (n > 1) throw new Error('777');
+                        return n
+                    })
+                    .map(n => n + '666')
+            )
+            .addListener({
+                next(val) {console.log(val)},
+                error(err) {console.error(err)},
+                complete() {console.log('complete')}
+            })
+    </script>
+</body>
+</html>
