@@ -388,11 +388,11 @@
         }
     });
 
-    /*_inherit(Concat, ConcatAll);
+    _inherit(Concat, ConcatAll);
     function Concat(param, ins) {
         Concat._super.call(this, param, ins);
     }
-    extend(ConcatAll.prototype, {
+    extend(Concat.prototype, {
         type: 'concat',
         startNext() {
             var u = this.out,
@@ -421,7 +421,7 @@
             if (u === NO) return;
             u._n(t);
         }
-    });*/
+    });
 
     /* WithLatestFrom */
     _inherit(WithLatestFrom, Operator);
@@ -749,12 +749,17 @@
             return Stream.create({
                 start(prod) {
                     var i = 0,
+                        start = false,
                         self = this;
 
                     function loop() {
                         if (self._open) {
-                            prod.next(i++);
+                            start && prod.next(i++);
                             requestAnimationFrame(loop)
+                        }
+
+                        if (!start) {
+                            start = true;
                         }
                     }
 
@@ -839,11 +844,11 @@
         exhaustMap(fn) {
             return this.map(fn).exhaust();
         },
-        /*concat() {
+        concat() {
             if (!arguments.length) throw new Error('concat: no next stream');
 
             return new Stream(new Concat(arguments, this))
-        },*/
+        },
         concatAll() {
             return new Stream(new ConcatAll(null, this))
         },
