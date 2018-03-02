@@ -41,6 +41,7 @@ Stream.create({
 ### exhaust
 ### exhaustMap
 ### concat
+### concatAll
 ### concatMap
 ### partition
 ### do
