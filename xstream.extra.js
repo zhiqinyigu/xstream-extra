@@ -1,9 +1,23 @@
-(function(global) {
-    const {NO, NO_IL, MemoryStream, Stream} = global.xstream;
+(function(root, factory) {
+    if (typeof define === 'function' && define.amd) {
+        define(['xstream'], factory);
+    } else if (typeof require === 'function') {
+        require(['xstream'], factory);
+    } else if (typeof exports === 'object') {
+        module.exports = factory(require('xstream'));
+    } else {
+        /*root.returnExports = */factory(root.xstream);
+    }
+}(this, function(xstream) {
+    const {NO, /* NO_IL, MemoryStream, */ Stream} = xstream;
     var extend = Object.assign;
 
     function noop() {}
-    global.xstream.noop = noop;
+    xstream.noop = noop;
+
+    function isFunction(fn) {
+        return typeof fn === 'function';
+    }
 
     const _inherit = (function () {
         const create = Object.create ? function(proto, c) {
@@ -44,7 +58,7 @@
     }
 
     function packPromise(pr) {
-        if (typeof pr.then == 'function') {
+        if (isFunction(pr.then)) {
             return Stream.fromPromise(pr);
         }
 
@@ -165,7 +179,7 @@
                 self._prevVal = val;
                 self.stopFn();
                 debounce$ = _try(this, val, out$);
-                
+
                 if (debounce$ == NO) {
                     return NO
                 } else {
@@ -480,13 +494,17 @@
 
     /* Cache */
     _inherit(Cache, Operator);
-    function Cache(fn, ins) {
+    function Cache(when, ins) {
         this._cache = NO;
-        Cache._super.call(this, fn, ins);
+        Cache._super.call(this, when, ins);
     }
     extend(Cache.prototype, {
         type: 'cache',
         startFn: function(out) {
+            if (this._expirationTime && (this._expirationTime < Date.now())) {
+                this._cache = NO;
+            }
+
             if (this._cache !== NO) {
                 out._n(this._cache);
                 out._c();
@@ -494,10 +512,17 @@
             }
         },
         _nFn: function(val, out) {
+            var when = this.param;
+
             if (this._cache === NO) {
+                if (typeof when === 'number') {
+                    this._expirationTime = Date.now() + when;
+                }
+
                 out._n(this._cache = val);
                 out._c();
             }
+
             return NO;
         }
         // ,_cFn: function() {return NO}
@@ -739,6 +764,22 @@
      * extend。如无特殊说明，操作符都是返回Stream。
      */
     extend(Stream, {
+        fromEvent: function(el, event) {
+            return Stream.create({
+                start(prod) {
+                    var n = 1;
+
+                    this.listener = function(e) {
+                        prod.next({event: e, index: n++});
+                    }
+
+                    el.addEventListener(event, this.listener);
+                },
+                stop() {
+                    el.removeEventListener(event, this.listener);
+                }
+            })
+        },
         Subject: function() {
             return Stream.create({
                 start() {},
@@ -770,47 +811,9 @@
                     this._open = false;
                 }
             })
-        }
-    });
-
-
-    extend(Stream.prototype, {
-        flattenMap(fn) {
-            return this.map(fn).flatten();
         },
-        /**
-         * ----1-2-3--|-->
-         *     cache()
-         * ----1|-->
-         *
-         * 在接收到上游的值以后next和complete（不管什么值，只要上游next了），并永久缓存下该值。
-         * 跟first()相似，差异在于再次订阅前者时，会立即获得缓存值。
-         */
-        cache() {
-            return new Stream(new Cache(null, this))
-        },
-
-        // 以下是Rx的同名操作符
-        throttle(fn) {
-            return new Stream(new Throttle(fn, this))
-        },
-        throttleTime(time) {
-            return new Stream(new Throttle(() => Stream.periodic(time), this))
-        },
-        debounce(fn) {
-            return new Stream(new Debounce(fn, this))
-        },
-        debounceTime(time) {
-            return new Stream(new Debounce(() => Stream.periodic(time), this))
-        },
-        // 仅仅执行fn后立即发射值，该操作符不会改变值
-        do(fn) {
-            return new Stream(new Do(fn, this))
-        },
-
-        // 延迟n毫秒发射
-        delay(n) {
-            return new Stream(new DelayWhen(() => Stream.create({
+        timeout(n) {
+            return Stream.create({
                 start(listener) {
                     this.timer = setTimeout(function() {
                         listener.next()
@@ -820,7 +823,69 @@
                 stop() {
                     clearTimeout(this.timer);
                 }
-            }), this))
+            })
+        }
+    });
+
+
+    extend(Stream.prototype, {
+        flattenMap(fn) {
+            return this.map(isFunction(fn) ? fn : () => fn).flatten();
+        },
+        /**
+         * ----1-2-3--|-->
+         *     cache()
+         * ----1|-->
+         *
+         * 在接收到上游的值以后next和complete（不管什么值，只要上游next了），并缓存下该值。
+         * 跟first()相似，差异在于再次订阅时，cache会立即获得缓存值（如果没有过期）。
+         *
+         * @param {Number} when 过期时间，获得上流数据后n毫秒后过期；
+         * @improtant 警告：切勿在scroll事件使用过期时间。
+         *            由于某些版本chrome(webkit)在连续触发scroll事件时，主动“优化”了定时器代码，某些情况（或设备）下scroll事件里的定时器
+         *            有几率被延后若干秒，由于cache过期时会取消订阅stream，而stream.js在取消订阅的实现使用了setTimeout(fn, 0)
+         * @info Blink deferred a task in order to make scrolling smoother. Your timer and network tasks should take less than 50ms to run to avoid this. Please see https://developers.google.com/web/tools/chrome-devtools/profile/evaluate-performance/rail and https://crbug.com/574343#c40 for more information.
+         */
+        cache(when) {
+            return new Stream(new Cache(when, this))
+        },
+        toPromise() {
+            var stream = this;
+
+            return new Promise(function(resolve, reject) {
+                var listener = {
+                    next(res) {
+                        stream.removeListener(listener);
+                        resolve(res);
+                    },
+                    error: reject
+                };
+
+                stream.addListener(listener);
+            });
+        },
+
+        // 以下是Rx的同名操作符
+        throttle(fn) {
+            return new Stream(new Throttle(fn, this))
+        },
+        throttleTime(time) {
+            return new Stream(new Throttle(() => Stream.timeout(time), this))
+        },
+        debounce(fn) {
+            return new Stream(new Debounce(fn, this))
+        },
+        debounceTime(time) {
+            return new Stream(new Debounce(() => Stream.timeout(time), this))
+        },
+        // 仅仅执行fn后立即发射值，该操作符不会改变值
+        do(fn) {
+            return new Stream(new Do(fn, this))
+        },
+
+        // 延迟n毫秒发射
+        delay(n) {
+            return new Stream(new DelayWhen(() => Stream.timeout(n), this))
         },
         // 延迟的时间取决于factory(val)返回的流什么时候发射值
         delayWhen(factory) {
@@ -842,7 +907,7 @@
             return new Stream(new Exhaust(null, this))
         },
         exhaustMap(fn) {
-            return this.map(fn).exhaust();
+            return this.map(isFunction(fn) ? fn : () => fn).exhaust();
         },
         concat() {
             if (!arguments.length) throw new Error('concat: no next stream');
@@ -853,7 +918,7 @@
             return new Stream(new ConcatAll(null, this))
         },
         concatMap(fn) {
-            return this.map(fn).concatAll();
+            return this.map(isFunction(fn) ? fn : () => fn).concatAll();
         },
 
         withLatestFrom(stream) {
@@ -881,6 +946,27 @@
             return new Stream(new TakeWhile(fn, this))
         },
 
+        filterEmpty: function(empty=null) {
+            return this.filter(val => val !== empty)
+        },
+
+        /*
+         * @example
+         * stream$.pardonError(fn, filterEmpty)
+         * stream$.pardonError(filterEmpty)
+         */
+        pardonError: function(fn, filterEmpty=true) {
+            return this.replaceError(err => {
+                if (typeof fn === 'boolean') {
+                    filterEmpty = fn;
+                    fn = null;
+                }
+
+                fn && fn(err);
+
+                return filterEmpty ? Stream.of(null).filterEmpty() : Stream.of(null)
+            })
+        },
 
         /**
          * 以下操作符由业务需求衍生出来，属于实验性的功能。
@@ -897,7 +983,7 @@
             var t = time;
 
             if (typeof time === 'number') {
-                time = () => Stream.periodic(t);
+                time = () => Stream.timeout(t);
             }
 
             return new Stream(new warpGroup(arguments, this))
@@ -914,4 +1000,4 @@
             return new Stream(new Concurrence(arguments, this))
         }
     });
-})(window);
+}));
