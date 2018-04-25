@@ -10,7 +10,8 @@
     }
 }(this, function(xstream) {
     const {NO, /* NO_IL, MemoryStream, */ Stream} = xstream;
-    var extend = Object.assign;
+    const extend = Object.assign;
+    const slice = Array.prototype.slice;
 
     function noop() {}
     xstream.noop = noop;
@@ -223,7 +224,21 @@
         _nFn: function(t, u) {
             return _try(this, t, u);
         }
-    })
+    });
+
+    /* Catch */
+    _inherit(Catch, Operator);
+    function Catch(fn, ins) {
+        Catch._super.call(this, fn, ins);
+        this.f = fn;
+    }
+
+    extend(Catch.prototype, {
+        type: 'catch',
+        _eFn: function(t, u) {
+            _try(this, t, u);
+        }
+    });
 
     /* DelayWhen */
     _inherit(DelayWhen, Operator);
@@ -473,7 +488,6 @@
         }
     });
 
-
     /* DistinctUntilChanged */
     _inherit(DistinctUntilChanged, Operator);
     function DistinctUntilChanged(compare, ins) {
@@ -550,6 +564,39 @@
         }
     });
 
+
+    /* BufferCount */
+    _inherit(BufferCount, Operator);
+    function BufferCount(param, ins) {
+        BufferCount._super.call(this, param, ins);
+        this.count = param[0] || 1;
+        this.start = param[1] || param[0];
+    }
+    extend(BufferCount.prototype, {
+        type: 'bufferCount',
+        startFn() {
+            this.buffer = [];
+        },
+        _nFn(n, out$) {
+            var {buffer, count, start} = this;
+
+            buffer.push(n);
+
+            if (buffer.length === count) {
+                out$._n(buffer.slice(0));
+                buffer.splice(0, start);
+            }
+
+            return NO
+        },
+        _cFn(_, out$) {
+            if (this.buffer.length) {
+                out$._n(this.buffer.slice(0));
+            }
+        }
+    });
+
+
     /*SkipUntil*/
     _inherit(SkipUntil, Operator);
     function SkipUntil(stream, ins) {
@@ -559,18 +606,17 @@
     extend(SkipUntil.prototype, {
         type: 'skipUntil',
         startFn() {
-            this._lock = true;
-        },
-        _nFn() {
             var self = this;
-    
+            self._lock = true;
+
             self.param.take(1)._add({
                 _n() {self._lock = false},
                 _c() {self._lock = false},
                 _e(err) {self._eFn(err)}
             });
-    
-            if (self._lock) return NO;
+        },
+        _nFn() {
+            if (this._lock) return NO;
         }
     });
 
@@ -760,6 +806,12 @@
 
 
 
+
+    function fillArr(arr, val, len) {
+        for (var i = 0; i < len; i++) arr[len] = val
+        return arr;
+    }
+
     /*
      * extend。如无特殊说明，操作符都是返回Stream。
      */
@@ -827,7 +879,6 @@
         }
     });
 
-
     extend(Stream.prototype, {
         flattenMap(fn) {
             return this.map(isFunction(fn) ? fn : () => fn).flatten();
@@ -878,7 +929,7 @@
         debounceTime(time) {
             return new Stream(new Debounce(() => Stream.timeout(time), this))
         },
-        // 仅仅执行fn后立即发射值，该操作符不会改变值
+        // 仅仅执行fn后立即发射值，该操作符不会改变值。通常用于对外部副作用。
         do(fn) {
             return new Stream(new Do(fn, this))
         },
@@ -938,6 +989,14 @@
             return new Stream(new Retry(count, this))
         },
 
+        bufferCount(n, start) {
+            return new Stream(new BufferCount(slice.call(arguments, 0), this))
+        },
+
+        skip(n) {
+            return this.skipUntil(this.take(n));
+        },
+
         skipUntil(stream) {
             return new Stream(new SkipUntil(stream, this))
         },
@@ -948,6 +1007,18 @@
 
         filterEmpty: function(empty=null) {
             return this.filter(val => val !== empty)
+        },
+
+        /**
+         * 由于官方的replaceError不能实现onCatch效果：只执行回调，但不改变stream的错误，即对外进行副作用。
+         * 所以手动实现一个。
+         * 官文：And, in case that new stream also emits an error, replace will be called again to get another stream to start replicating.
+         *
+         * @param  {Function} fn 发生错误时的回调函数
+         * @return {Stream}  返回当前流
+         */
+        catch(fn) {
+            return new Stream(new Catch(fn, this));
         },
 
         /*
