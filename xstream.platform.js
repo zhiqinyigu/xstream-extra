@@ -1,105 +1,206 @@
+import { Stream, noop } from 'xstream';
 import Vue from 'vue';
-import {Stream} from 'xstream';
 
-/**
- * ajax的xsteram封装
- * @param  {String}        url          请求地址
- * @param  {Object}        params       请求参数
- * @param  {Object|String} [setting]    配置，只想配置method时，可以传字符串。
- *                                      建议将全局的配置写在Stream.ajaxdefaultSetting。
- * @param  {String}        [setting.method]       请求方式
- * @param  {Boolean}       [setting.proxyError]   是否处理错误
- * @param  {Number}        [setting.retry]        失败时是否重试
- * @param  {Function}      [setting.checkJson]    验证json，返回true表示该请求是有效的。否则视为失败
- * @param  {Function}      [setting.toastAPI]     toast接口，代理处理错误时用
- * @param  {Function}      [setting.httpAPI]      http模块。签名要求：httpAPI[method](url, method === 'post' ? params : {params})
- * @param  {Boolean}       [proxyError]  setting.proxyError的快捷方式
- * @param  {Number}        [retry]       setting.retry的快捷方式
- * @return {Stream}   返回一个Steram对象
- * @example
- * Stream.ajax(url, params, setting|method, proxyError, retry);
- * Stream.ajax(url, params, setting|method, retry);
- * Stream.ajax(url, params, setting|method);
- * Stream.ajax(url, params, proxyError);
- * Stream.ajax(url, params, retry);
- */
-Stream.ajax = function(url, params, setting, proxyError, retry) {
-    let key;
-    let _setting = typeof setting === 'object' ? setting : {};
+function upperFirstChat(name) {
+  return name[0].toUpperCase() + name.slice(1);
+}
 
-    _setting.proxyError = proxyError;
-    _setting.retry = retry;
+if (typeof wx === 'object' && !!wx.login) {
+  Stream.prototype.logError = function() {
+    return this
+  };
 
-    switch (typeof setting) {
-        case 'string':
-            _setting.method = setting;
-            break;
-        case 'number':
-            _setting.retry = setting;
-            break;
-        case 'boolean':
-            _setting.proxyError = setting;
-            break;
-    }
-
-    if (arguments.length === 4 && typeof proxyError === 'number') {
-        _setting.retry = proxyError;
-    }
-
-    // 删除undefined的字段
-    for (key in _setting) {
-        if (typeof _setting[key] === 'undefined') delete _setting[key];
-    }
-
-    // 合并默认设置
-    _setting = Object.assign({}, Stream.ajax.defaultSetting, _setting);
-
-    // 取出参数定义
-    const {toastAPI, checkJson, method, httpAPI} = _setting;
-    retry = _setting.retry;
-
-    let task = Stream.create({
-        start(prod) {
-            httpAPI[method || 'get'](url, method === 'post' ? params : {params}).then(res => {
-                if ((res.data && +res.data.code === 1) || (checkJson && checkJson(res) === true)) {
-                    return res.data;
-                }
-
-                return Promise.reject(res.data)
-            }).then(json => {
-                prod.next(json);
-                prod.complete()
-            }, err => prod.error(err))
-        },
-        stop() {}
+  Stream.getBoundingClientRect = function(dom, isAll) {
+    return Stream.create({
+      start(prod) {
+        wx.createSelectorQuery()[isAll ? 'selectAll' : 'select'](dom)
+          .boundingClientRect()
+          .exec(function(res) {
+            prod.next(res[0]);
+            prod.complete();
+          })
+      },
+      stop: noop
     });
+  }
 
-    task = (typeof retry === 'number' && retry) ? task.retry(retry) : task;
+  Stream.fromMpEvent = function(node, event) {
+    return Stream.create({
+      start(prod) {
+        node['on' + upperFirstChat(event)](this.listener = function() {
+          prod.next()
+        });
+      },
+      stop() {
+        node['off' + upperFirstChat(event)](this.listener);
+      }
+    });
+  }
+} else {
+  Stream.getBoundingClientRect = function(dom) {
+    return Stream.of(1).map(() => {
+      dom = (typeof dom === 'object' ? dom : document.querySelector(dom));
 
-    return _setting.proxyError ? task.pardonError(err => err && toastAPI && toastAPI(err.msg || err)) : task;
-};
+      return dom ? dom.getBoundingClientRect() : null;
+    })
+  }
 
-/*Stream.domReady = function() {
-    return Stream.from(domReadyPr);
-};*/
+  Stream.loadImage = function(src) {
+    return Stream.create({
+      start(prod) {
+        const img = new Image();
+
+        img.onload = function() {
+          prod.next(img);
+          prod.complete();
+        };
+
+        function errHandler() {
+          prod.error(null);
+        }
+
+        img.onerror = errHandler;
+        img.onabort = errHandler;
+        img.crossOrigin = 'Anonymous';
+
+        img.src = src;
+      },
+      stop() {}
+    })
+  };
+}
 
 Stream.prototype.$addListener = function(vm, listeners) {
-    if (!(vm instanceof Vue)) {
-        throw new Error('vm不是Vue实例')
-    }
+  if (!(vm instanceof Vue)) {
+    throw new Error('vm不是Vue实例')
+  }
 
-    listeners = Object.assign({error: err => console.error(err)}, listeners);
+  listeners = Object.assign({
+    error: err => console.error(err)
+  }, listeners);
 
-    vm._stream_.push([this, listeners]);
+  vm._stream_.push([this, listeners]);
 
-    return this.addListener(listeners);
+  return this.addListener(listeners);
 };
 
 Vue.mixin({
-    created() {
-        this._stream_ = []
-    },
-    beforeDestroy() {
-        this._stream_.forEach(res => res[0].removeListener(res[1]))
+  methods: {
+    _unsubscribeObservableForInstance() {
+      this._stream_ && this._stream_.forEach(res => res[0].removeListener(res[1]));
     }
-})
+  },
+  beforeMount() {
+    // mpvue中，页面级的beforeDestroy不会触发。
+    this._unsubscribeObservableForInstance();
+    this._stream_ = [];
+  },
+  onUnload() {
+    this._unsubscribeObservableForInstance();
+  },
+  beforeDestroy() {
+    this._unsubscribeObservableForInstance();
+  }
+});
+
+
+
+// subscriptions的合并行为
+Vue.config.optionMergeStrategies.subscriptions = function(to, from) {
+  if (to) {
+    if (from) {
+      return function() {
+        return Object.assign({}, to.call(this), from.call(this));
+      }
+    } else {
+      return to;
+    }
+  }
+
+  return from;
+};
+
+// subscriptions功能
+function defineReactive(vm, key, val) {
+  if (key in vm) {
+    vm[key] = val;
+  } else {
+    Vue.util.defineReactive(vm, key, val);
+  }
+}
+
+Vue.mixin({
+  mounted() {
+    const {subscriptions} = this.$options;
+    const vm = this;
+    let key;
+    let $observables;
+
+    if (subscriptions) {
+      vm.$observables = $observables = subscriptions.call(vm) || {};
+
+      for (key in vm.$observables) {
+        (function(key) {
+          defineReactive(vm, key, undefined);
+
+          $observables[key].$addListener(vm, {
+            next(val) {
+              vm[key] = val;
+            }
+          });
+        })(key)
+      }
+    }
+  }
+});
+
+Vue.prototype.$watchAsObservable = function(expOrFn, options) {
+  const vm = this;
+
+  return Stream.create({
+    start(prod) {
+      this.unwatch = vm.$watch(
+        expOrFn,
+        function(newValue, oldValue) {
+          newValue !== oldValue && prod.next({newValue, oldValue});
+        },
+        options
+      );
+    },
+    stop() {
+      this.unwatch();
+    }
+  })
+};
+
+
+Vue.prototype.$createDialogStream = function(key, observableOrFn) {
+  const vm = this;
+  let observable;
+
+  return Stream.create({
+    start(prod) {
+      vm[key] = true;
+
+      if (observableOrFn) {
+        if (typeof observableOrFn === 'function') {
+          observable = observableOrFn(prod);
+        } else {
+          observable = observableOrFn;
+        }
+
+        observable.addListener(this.listener = {
+          next: val => {
+            prod.next(val)
+          }
+        });
+      } else {
+        prod.next(1);
+      }
+    },
+    stop() {
+      observable.removeListener(this.listener);
+      vm[key] = false;
+    }
+  }).endWhen(vm.$watchAsObservable(key).map(res => res.newValue).filter(val => !val));
+}
